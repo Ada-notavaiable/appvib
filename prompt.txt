@@ -1,0 +1,14 @@
+vorrei creare un app per android (in pwe per ora) che utilizzi il buetooth per connettersi ad un massaggiatore vibrante con 3 velocità, il dispositivo può essere connesso con love spouse ed è della marca birdsexy
+
+1. Il dispositivo "birdsexy" segue il protocollo standard Lovense (comandi tipo `Vibrate:X;` su GATT BLE), giusto? Vuoi che la PWA funzioni con qualsiasi dispositivo compatibile Lovense o vuoi un'implementazione mirata solo a quel modello specifico?
+↳ Standard Lovense
+2. In che lingua preferisci l'interfaccia della PWA?
+↳ Italiano
+3. Che livello di completezza vuoi per la PWA in questa prima versione?
+↳ MVP essenziale
+
+Cosa provare ora:
+1. Tieni premuto il pulsante fisico sul dispositivo per 3-5 secondi finché il LED lampeggia
+2. Apri la PWA su Chrome Android (HTTPS o localhost)
+3. Se "Connetti dispositivo Lovense" non trova nulla → tocca "Scansione completa" che mostrerà ogni BLE (incluso il tuo), anche se ha un nome diverso da  LVS-… 
+4. Seleziona il tuo toy → dovrebbe mostrare batteria + i 3 bottoni velocità
