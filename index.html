@@ -116,6 +116,34 @@
       </div>
     </section>
 
+    <!-- Sezione debug: visibile dopo il consenso, mostra GATT profile del dispositivo -->
+    <section class="debug card" id="debugSection" hidden>
+      <h2 class="debug__title">🔧 Debug BLE</h2>
+      <p class="debug__lead">
+        Mostra <strong>servizi</strong> e <strong>caratteristiche</strong> del
+        dispositivo connesso, per identificarne il modello. Usa questa sezione se
+        il tuo toy non appare nella lista "Connetti Lovense".
+      </p>
+      <button id="debugBtn" class="btn btn--primary" type="button">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
+        </svg>
+        Scansiona qualsiasi dispositivo e analizzalo
+      </button>
+      <div id="debugResult" class="debug__result" hidden></div>
+      <div class="debug__actions" hidden id="debugActions">
+        <button id="debugCopyBtn" class="btn btn--ghost btn--small" type="button">
+          Copia JSON (per diagnosticarlo)
+        </button>
+      </div>
+      <p class="hint" style="margin-top: 12px;">
+        Se vedi <em>"nessun servizio esposto"</em>, il dispositivo usa UUID
+        proprietari non dichiarati al browser. Per leggere il profilo GATT
+        completo usa un'app nativa come <strong>nRF Connect</strong>.
+      </p>
+    </section>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <footer class="footer">

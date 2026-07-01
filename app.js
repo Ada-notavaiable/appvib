@@ -73,6 +73,14 @@
     status: document.getElementById("status"),
     statusText: document.getElementById("statusText"),
     toast: document.getElementById("toast"),
+    debugSection: document.getElementById("debugSection"),
+  };
+
+  const debugEls = {
+    btn: document.getElementById("debugBtn"),
+    result: document.getElementById("debugResult"),
+    copyBtn: document.getElementById("debugCopyBtn"),
+    actions: document.getElementById("debugActions"),
   };
 
   const speedButtons = Array.from(document.querySelectorAll(".btn--speed"));
@@ -112,6 +120,7 @@
   function setConsented(consented) {
     els.consentScreen.hidden = consented;
     els.controlsSection.hidden = !consented;
+    els.debugSection.hidden = !consented;
   }
 
   function lower(s) { return s.toLowerCase(); }
@@ -402,6 +411,257 @@
   document.addEventListener("visibilitychange", () => {
     if (state.writeChar && document.visibilityState === "visible") {
       requestBattery();
+    }
+  });
+
+  // --- Debug BLE ---
+  // Servizi dichiarati in optionalServices. Il browser espone SOLO questi via GATT;
+  // eventuali servizi con UUID non in lista restano invisibili (limitazione della
+  // specifica Web Bluetooth, aggirabile solo con app native come nRF Connect).
+  const DEBUG_OPTIONAL_SERVICES = [
+    // Standard GATT (16-bit espansi a 128-bit)
+    "00001800-0000-1000-8000-00805f9b34fb", // generic_access (universale)
+    "00001801-0000-1000-8000-00805f9b34fb", // generic_attribute
+    "00001802-0000-1000-8000-00805f9b34fb", // immediate_alert
+    "00001803-0000-1000-8000-00805f9b34fb", // link_loss
+    "00001804-0000-1000-8000-00805f9b34fb", // tx_power
+    "00001805-0000-1000-8000-00805f9b34fb", // current_time
+    "00001807-0000-1000-8000-00805f9b34fb", // next_dst_change
+    "00001808-0000-1000-8000-00805f9b34fb", // local_time
+    "00001809-0000-1000-8000-00805f9b34fb", // dst_change
+    "0000180a-0000-1000-8000-00805f9b34fb", // device_information
+    "0000180d-0000-1000-8000-00805f9b34fb", // heart_rate
+    "0000180f-0000-1000-8000-00805f9b34fb", // battery_service
+    "00001810-0000-1000-8000-00805f9b34fb", // blood_pressure
+    "00001811-0000-1000-8000-00805f9b34fb", // alert_notification
+    "00001812-0000-1000-8000-00805f9b34fb", // human_interface_device
+    // Nordic UART (NUS) — adottato da molti toy BLE economici
+    "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+    // Lovense Gen1 / We-Vibe legacy / SVAKOM (tutti usano lo stesso prefisso 0xfff0)
+    "0000fff0-0000-1000-8000-00805f9b34fb",
+  ];
+
+  let lastDebugReport = null;
+
+  function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+
+  // Mappa nomi BLE ⇒ etichette più compatte per il riquadro di output.
+  function prettyProps(char) {
+    const labels = {
+      read: "read",
+      write: "write",
+      writeWithoutResponse: "writeNoResp",
+      notify: "notify",
+      indicate: "indicate",
+      broadcast: "broadcast",
+      authenticatedSignedWrites: "signWrites",
+      reliableWrite: "reliableWrite",
+      writableAuxiliaries: "auxWrite",
+    };
+    return (char.properties || []).map((p) => labels[p] || p).join(", ");
+  }
+
+  // Formatta un'eccezione (Error DOM o plain object) come stringa breve.
+  function errText(e) {
+    const name = (e && e.name) || "";
+    const msg = (e && e.message) || String(e);
+    return name ? name + " " + msg : msg;
+  }
+
+  async function debugConnect() {
+    if (!isWebBluetoothSupported()) {
+      showToast("Web Bluetooth non supportato", "error");
+      return;
+    }
+
+    // Chiude qualunque sessione Lovense precedente per evitare leak di connessioni GATT.
+    try { await disconnect(); } catch (_) { /* ignorato: debug è modalità diagnostica */ }
+
+    setStatus("connecting", "Debug: seleziona un dispositivo…");
+    debugEls.result.hidden = true;
+    debugEls.result.textContent = "";
+    debugEls.actions.hidden = true;
+    lastDebugReport = null;
+
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: DEBUG_OPTIONAL_SERVICES,
+      });
+
+      device.addEventListener("gattserverdisconnected", () => {
+        // Silenzioso: l'utente può chiudere il debug in qualsiasi momento dal telefono.
+      });
+
+      setStatus("connecting", `Connessione debug a ${device.name || "(sconosciuto)"}…`);
+      const server = await device.gatt.connect();
+
+      const report = {
+        name: device.name || "(senza nome)",
+        id: device.id || "—",
+        paired: !!device.paired,
+        gattConnected: !!server.connected,
+        services: [],
+        servicesError: null,
+      };
+
+      // getPrimaryServices() può lanciare NotFoundError se nessun servizio della
+      // optionalServices list è presente sul dispositivo: consideriamolo un caso
+      // valido (il browser ha correttamente filtrato, non è un bug).
+      let services = [];
+      try {
+        services = await server.getPrimaryServices();
+      } catch (e) {
+        report.servicesError = errText(e);
+      }
+
+      for (const service of services) {
+        const svc = { uuid: service.uuid, characteristics: [] };
+        try {
+          const chars = await service.getCharacteristics();
+          for (const c of chars) {
+            const ch = {
+              uuid: c.uuid,
+              properties: Array.from(c.properties || []),
+            };
+            // Solo le characteristic con bit "read" vengono lette: le altre
+            // restituiscono NotPermitted/GATT error inutile.
+            if (c.properties && c.properties.read) {
+              try {
+                const v = await c.readValue();
+                // byteOffset/byteLength: alcuni build di Chromium restituiscono
+                // una DataView su un ArrayBuffer condiviso; senza slice può
+                // anteporre byte "fratelli".
+                ch.valueHex = Array.from(
+                  new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
+                )
+                  .map((b) => b.toString(16).padStart(2, "0"))
+                  .join(" ");
+                try {
+                  ch.valueText = new TextDecoder("utf-8", { fatal: false }).decode(v);
+                } catch (_) { /* non testuale */ }
+              } catch (e) {
+                ch.readError = errText(e);
+              }
+            }
+            svc.characteristics.push(ch);
+          }
+        } catch (e) {
+          svc.error = errText(e);
+        }
+        report.services.push(svc);
+      }
+
+      lastDebugReport = report;
+      renderDebugReport(report);
+      setStatus("connected", `Debug · ${report.name}`);
+      showToast(
+        `Debug OK · ${report.services.length} servizio/i`,
+        report.services.length ? "success" : ""
+      );
+    } catch (err) {
+      console.error("Errore debug:", err);
+      setStatus("error", "Debug fallito");
+      let msg;
+      if (err && err.name === "NotFoundError") msg = "Nessun dispositivo selezionato";
+      else if (err && err.message) msg = err.message;
+      else msg = "Errore debug";
+      showToast(msg, "error");
+    }
+  }
+
+  function renderDebugReport(report) {
+    const lines = [];
+
+    lines.push(`<div class="row"><strong>Nome:</strong> ${escHtml(report.name)}</div>`);
+    lines.push(`<div class="row"><strong>ID:</strong> ${escHtml(report.id)}</div>`);
+    lines.push(
+      `<div class="row"><strong>Paired:</strong> ${report.paired ? "sì" : "no"}` +
+        ` · <strong>GATT:</strong> ${report.gattConnected ? "ok" : "—"}</div>`
+    );
+
+    if (report.servicesError) {
+      lines.push(`<div class="row err">Servizi: ${escHtml(report.servicesError)}</div>`);
+    }
+
+    if (!report.services.length) {
+      lines.push(
+        `<div class="row err" style="margin-top:10px;">⚠ Nessun servizio esposto dal browser.</div>`
+      );
+      lines.push(
+        `<div class="row" style="color:var(--muted);">` +
+          `Connesso a <em>${escHtml(report.name)}</em>, ma il browser ha nascosto i servizi perché` +
+          ` usano UUID proprietari non dichiarati nella lista <code>optionalServices</code>.` +
+          ` Per vedere il profilo GATT completo usa <strong>nRF Connect</strong>.` +
+          `</div>`
+      );
+    } else {
+      lines.push(
+        `<div class="row" style="margin-top:10px;">` +
+          `<strong>Servizi esposti (${report.services.length}):</strong></div>`
+      );
+      for (const svc of report.services) {
+        lines.push(`<div class="svc">▸ Service ${escHtml(svc.uuid)}</div>`);
+        if (svc.error) {
+          lines.push(`<div class="l err">errore: ${escHtml(svc.error)}</div>`);
+          continue;
+        }
+        if (!svc.characteristics.length) {
+          lines.push(`<div class="l">(nessuna caratteristica)</div>`);
+          continue;
+        }
+        for (const c of svc.characteristics) {
+          lines.push(`<div class="ch">· Char ${escHtml(c.uuid)}</div>`);
+          lines.push(`<div class="l">props: ${escHtml(prettyProps(c))}</div>`);
+          if ("valueHex" in c) {
+            lines.push(`<div class="l ok">value (hex): ${escHtml(c.valueHex)}</div>`);
+            if (
+              "valueText" in c &&
+              c.valueText &&
+              /^[\x09\x0A\x0D\x20-\x7E]*$/.test(c.valueText)
+            ) {
+              lines.push(
+                `<div class="l">value (txt): <em>${escHtml(c.valueText)}</em></div>`
+              );
+            }
+          }
+          if (c.readError) {
+            lines.push(`<div class="l err">read err: ${escHtml(c.readError)}</div>`);
+          }
+        }
+      }
+    }
+
+    debugEls.result.innerHTML = lines.join("");
+    debugEls.result.hidden = false;
+    debugEls.actions.hidden = false;
+  }
+
+  debugEls.btn?.addEventListener("click", debugConnect);
+  debugEls.copyBtn?.addEventListener("click", async () => {
+    if (!lastDebugReport) return;
+    const json = JSON.stringify(lastDebugReport, null, 2);
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(json);
+        copied = true;
+      }
+    } catch (_) { }
+    if (copied) {
+      showToast("JSON copiato negli appunti", "success");
+    } else if (navigator.share) {
+      try {
+        await navigator.share({ text: json });
+      } catch (_) {
+        showToast("Copia fallita, riprova", "error");
+      }
+    } else {
+      showToast("Copia non supportata qui, apri il debug sul telefono", "error");
     }
   });
 
