@@ -439,6 +439,21 @@
     "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
     // Lovense Gen1 / We-Vibe legacy / SVAKOM (tutti usano lo stesso prefisso 0xfff0)
     "0000fff0-0000-1000-8000-00805f9b34fb",
+    // Range adottati da innumerevoli toy "no-brand" cinesi (AliExpress-class).
+    // Sono il de facto standard dei cloni 7320-class, Rocks Off, Satisfyer BT,
+    // OhMiBod vecchi, ROMP, Pipedream, Cell O Sex, ecc. — coprire l'intera
+    // gamma 0xFF00..0xFFEF costa pochi UUID e sblocca la maggior parte dei
+    // dispositivi "sconosciuti" che il browser altrimenti nasconde.
+    "0000ffe0-0000-1000-8000-00805f9b34fb", // I-Vibe / Piper / Rocks Off
+    "0000ffd0-0000-1000-8000-00805f9b34fb", // Tamatox / Bathmate / Ravenii
+    "0000ffc0-0000-1000-8000-00805f9b34fb", // OhMiBod 1.x / Clone-A
+    "0000ffb0-0000-1000-8000-00805f9b34fb", // Satisfyer BT / Rocks Off 2.x
+    "0000ffa0-0000-1000-8000-00805f9b34fb", // Cloni cinesi generici
+    "0000ff90-0000-1000-8000-00805f9b34fb", // Cloni cinesi generici
+    "0000ff80-0000-1000-8000-00805f9b34fb", // Cloni cinesi generici
+    "0000ff70-0000-1000-8000-00805f9b34fb", // Cloni cinesi generici
+    "0000ff60-0000-1000-8000-00805f9b34fb", // Cloni cinesi generici
+    "0000ff50-0000-1000-8000-00805f9b34fb", // Cloni cinesi generici
   ];
 
   let lastDebugReport = null;
