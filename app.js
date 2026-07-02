@@ -16,6 +16,10 @@
 (() => {
   "use strict";
 
+  // Pattern caratteristiche note dei cloni BLE per adult-toy.
+  // Tutti i cloni 7320-class rispettano il pattern service 0xXXy0,
+  // write 0xXXy2, notify 0xXXy1 — quindi enumeriamo l'intera gamma.
+  // L'ordine è importante: viene provato prima il più probabile.
   const KNOWN_PROFILES = [
     {
       name: "Gen2 (Nordic UART)",
@@ -24,12 +28,145 @@
       notify:  "6e400003-b5a3-f393-e0a9-e50e24dcca9e",
     },
     {
-      name: "Gen1 (Legacy)",
+      name: "Clone FFE0 (Birdsexy 7320, I-Vibe, Piper)",
+      service: "0000ffe0-0000-1000-8000-00805f9b34fb",
+      write:   "0000ffe2-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ffe1-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Gen1 (Legacy Lovense, We-Vibe, Kiiroo, SVAKOM)",
       service: "0000fff0-0000-1000-8000-00805f9b34fb",
       write:   "0000fff2-0000-1000-8000-00805f9b34fb",
       notify:  "0000fff1-0000-1000-8000-00805f9b34fb",
     },
+    {
+      name: "Clone FFB0 (Satisfyer BT, Rocks Off 2.x)",
+      service: "0000ffb0-0000-1000-8000-00805f9b34fb",
+      write:   "0000ffb2-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ffb1-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FFC0 (OhMiBod 1.x, Lovelife)",
+      service: "0000ffc0-0000-1000-8000-00805f9b34fb",
+      write:   "0000ffc2-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ffc1-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FFD0 (Tamatox, Bathmate, Ravenii)",
+      service: "0000ffd0-0000-1000-8000-00805f9b34fb",
+      write:   "0000ffd2-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ffd1-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FFA0 (AliExpress generici)",
+      service: "0000ffa0-0000-1000-8000-00805f9b34fb",
+      write:   "0000ffa2-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ffa1-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FF90",
+      service: "0000ff90-0000-1000-8000-00805f9b34fb",
+      write:   "0000ff92-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ff91-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FF80",
+      service: "0000ff80-0000-1000-8000-00805f9b34fb",
+      write:   "0000ff82-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ff81-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FF70",
+      service: "0000ff70-0000-1000-8000-00805f9b34fb",
+      write:   "0000ff72-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ff71-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FF60",
+      service: "0000ff60-0000-1000-8000-00805f9b34fb",
+      write:   "0000ff62-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ff61-0000-1000-8000-00805f9b34fb",
+    },
+    {
+      name: "Clone FF50",
+      service: "0000ff50-0000-1000-8000-00805f9b34fb",
+      write:   "0000ff52-0000-1000-8000-00805f9b34fb",
+      notify:  "0000ff51-0000-1000-8000-00805f9b34fb",
+    },
   ];
+
+  // Lista completa dei servizi da dichiarare come optionalServices per il chooser
+  // BLE. Usata sia dai bottoni "Connetti" esistenti sia dai bottoni "Per modello"
+  // della griglia: dare al browser TUTTI questi UUID significa che, dopo lo
+  // scan, potremo chiedere `getPrimaryService(...)` su qualsiasi servizio noto.
+  const COMPREHENSIVE_OPTIONAL_SERVICES = [
+    ...KNOWN_PROFILES.map((p) => p.service),
+    "0000180f-0000-1000-8000-00805f9b34fb", // battery_service (standard SIG)
+    "0000180a-0000-1000-8000-00805f9b34fb", // device_information (per nome/modello)
+  ];
+
+  // Bottoni della griglia "Prova per modello". Ogni bottone apre il chooser
+  // BLE con un sottoinsieme specifico di optionalServices per sbloccare la
+  // lettura del profilo GATT del clone corrispondente. Tutti convergono poi
+  // sull'unico probe Lovense ASCII (`Vibrate:1;` → `Vibrate:0;`).
+  const KNOWN_MODELS = [
+    {
+      key: "lovense-original",
+      label: "Lovense",
+      description: "Filtra nomi LVS-*. Per Hush, Nora, Max, Lush originali.",
+      filters: [{ namePrefix: "LVS-" }],
+      optionalServices: [
+        "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+        "0000fff0-0000-1000-8000-00805f9b34fb",
+      ],
+    },
+    {
+      key: "ffe0-clone",
+      label: "Clone cinese 7320",
+      description: "Servizio FFE0. Il più probabile per il Toy ID 7320 del QR code.",
+      filters: null,
+      optionalServices: [
+        "0000ffe0-0000-1000-8000-00805f9b34fb",
+        "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+      ],
+    },
+    {
+      key: "ffb0-clone",
+      label: "Satisfyer / FFB0",
+      description: "Satisfyer BT, Rocks Off 2.x, cloni AliExpress 'Satisfyer-like'.",
+      filters: null,
+      optionalServices: [
+        "0000ffb0-0000-1000-8000-00805f9b34fb",
+        "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+      ],
+    },
+    {
+      key: "fff0-legacy",
+      label: "SVAKOM / Kiiroo",
+      description: "We-Vibe, SVAKOM, Kiiroo, ROMP (servizio 0xfff0 legacy).",
+      filters: null,
+      optionalServices: [
+        "0000fff0-0000-1000-8000-00805f9b34fb",
+      ],
+    },
+    {
+      key: "ffc0-ohmibod",
+      label: "OhMiBod / Lovelife",
+      description: "Vecchi OhMiBod, Lovelife, cloni Lovelife.",
+      filters: null,
+      optionalServices: [
+        "0000ffc0-0000-1000-8000-00805f9b34fb",
+      ],
+    },
+    {
+      key: "try-all",
+      label: "Prova TUTTI",
+      description: "Scansione aggressiva: ogni BLE, ogni servizio noto.",
+      filters: null,
+      optionalServices: COMPREHENSIVE_OPTIONAL_SERVICES,
+    },
+  ];
+  const KNOWN_MODELS_BY_KEY = Object.fromEntries(KNOWN_MODELS.map((m) => [m.key, m]));
 
   // Regex per Gen3: XY300001-002Z-4bd4-bbd5-a6920e4c5653
   const GEN3_PATTERN = /^([0-9a-f]{2})300001-002([0-9a-f])-4bd4-bbd5-a6920e4c5653$/i;
@@ -74,6 +211,8 @@
     statusText: document.getElementById("statusText"),
     toast: document.getElementById("toast"),
     debugSection: document.getElementById("debugSection"),
+    modelsSection: document.getElementById("modelsSection"),
+    modelsGrid: document.getElementById("modelsGrid"),
   };
 
   const debugEls = {
@@ -120,6 +259,7 @@
   function setConsented(consented) {
     els.consentScreen.hidden = consented;
     els.controlsSection.hidden = !consented;
+    els.modelsSection.hidden = !consented;
     els.debugSection.hidden = !consented;
   }
 
@@ -198,7 +338,7 @@
         ...(acceptAll
           ? { acceptAllDevices: true }
           : { filters: [{ namePrefix: "LVS-" }] }),
-        optionalServices: KNOWN_PROFILES.map((p) => lower(p.service)),
+        optionalServices: COMPREHENSIVE_OPTIONAL_SERVICES.map(lower),
       });
 
       device.addEventListener("gattserverdisconnected", onDisconnected);
@@ -253,6 +393,123 @@
       } else {
         msg = "Impossibile connettersi";
       }
+      showToast(msg, "error");
+    }
+  }
+
+  /**
+   * Avvia una connessione "modello-specifica": apre il chooser BLE con un
+   * sottoinsieme di optionalServices ristretto al marchio (es. solo FFE0 per
+   * i cloni 7320), per poi applicare il probe Lovense ASCII condiviso
+   * (`Vibrate:1;` → `Vibrate:0;`) per verificare il command-set.
+   */
+  async function connectByModel(modelKey) {
+    if (!isWebBluetoothSupported()) {
+      showToast("Web Bluetooth non supportato da questo browser", "error");
+      return;
+    }
+    const cfg = KNOWN_MODELS_BY_KEY[modelKey];
+    if (!cfg) {
+      showToast("Modello sconosciuto", "error");
+      return;
+    }
+
+    setStatus("connecting", `Ricerca ${cfg.label}…`);
+
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        ...(cfg.filters ? { filters: cfg.filters } : { acceptAllDevices: true }),
+        optionalServices: (cfg.optionalServices || COMPREHENSIVE_OPTIONAL_SERVICES).map(lower),
+      });
+
+      device.addEventListener("gattserverdisconnected", onDisconnected);
+
+      const displayName = device.name || cfg.label;
+      setStatus("connecting", `Connessione a ${displayName}…`);
+      const server = await device.gatt.connect();
+
+      const found = await findLovenseService(server);
+      if (!found) {
+        try { server.disconnect(); } catch {}
+        throw new Error(
+          `Profilo BLE non riconosciuto per "${cfg.label}". ` +
+          `Metti il dispositivo in modalità pairing (LED lampeggia) e riprova.`
+        );
+      }
+
+      state.device = device;
+      state.server = server;
+      state.profile = found.profile;
+      state.writeChar = found.writeChar;
+      state.notifyChar = found.notifyChar;
+
+      els.deviceName.textContent = displayName;
+
+      let onNotifyAttached = false;
+      if (state.notifyChar) {
+        try {
+          await state.notifyChar.startNotifications();
+          state.notifyChar.addEventListener("characteristicvaluechanged", onNotify);
+          onNotifyAttached = true;
+        } catch (e) {
+          console.warn("Notifiche non abilitate:", e);
+        }
+      }
+
+      // Probe: scrive `Vibrate:1;`, attende 250 ms, scrive `Vibrate:0;`.
+      // Se sul canale notify riceviamo un "OK" (o un numero di batteria),
+      // il command-set Lovense ASCII è confermato. In caso contrario,
+      // continuiamo comunque: molti cloni cinesi accettano la scrittura
+      // ma non supportano notify.
+      // Best-effort: il probe è breve (≤ 300 ms in totale) e termina sempre
+      // con `Vibrate:0;`. Stacchiamo temporaneamente onNotify per non
+      // confondere updateBattery() con eventuali risposte numeriche
+      // (alcuni cloni 7320 rispondono alla vibrazione con un numero di
+      // batteria che altrimenti popola la UI prima del valore reale).
+      // onNotifyAttached protegge dal caso in cui startNotifications sia
+      // fallito: in quel caso onNotify non è mai stato agganciato e ogni
+      // remove/add su di esso sarebbe un no-op rumoroso.
+      let acknowledged = false;
+      const probeListener = (ev) => {
+        const txt = state.textDecoder.decode(ev.target.value).trim();
+        if (/^OK/i.test(txt) || /^\d{1,3}$/.test(txt)) acknowledged = true;
+      };
+      if (state.notifyChar && onNotifyAttached) {
+        state.notifyChar.removeEventListener("characteristicvaluechanged", onNotify);
+        state.notifyChar.addEventListener("characteristicvaluechanged", probeListener);
+      }
+      await sendCommand("Vibrate:0;"); // safety: spegne prima del probe
+      await sendCommand("Vibrate:1;");
+      await new Promise((r) => setTimeout(r, 250));
+      await sendCommand("Vibrate:0;");
+      if (state.notifyChar && onNotifyAttached) {
+        state.notifyChar.removeEventListener("characteristicvaluechanged", probeListener);
+        state.notifyChar.addEventListener("characteristicvaluechanged", onNotify);
+      }
+
+      setStatus("connected", `Connesso · ${found.profile.name}`);
+      setUIConnected(true);
+      const probeNote =
+        acknowledged
+          ? " (probe OK)"
+          : state.notifyChar
+            ? ""
+            : " (probe silenzioso)";
+      showToast(
+        `Connesso a ${displayName} · ${found.profile.name}${probeNote}`,
+        "success"
+      );
+
+      requestBattery();
+      startBatteryPolling();
+    } catch (err) {
+      console.error("Errore di connessione:", err);
+      setStatus("error", "Connessione fallita");
+      let msg;
+      if (err && err.name === "NotFoundError") msg = "Nessun dispositivo selezionato";
+      else if (err && err.name === "SecurityError") msg = "Bluetooth negato dal browser (HTTPS richiesto fuori da localhost)";
+      else if (err && err.message) msg = err.message;
+      else msg = "Impossibile connettersi";
       showToast(msg, "error");
     }
   }
@@ -462,6 +719,24 @@
     return String(s).replace(/[&<>"']/g, (c) => (
       { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]
     ));
+  }
+
+  // Popola la griglia "Prova per modello" dai metadati KNOWN_MODELS.
+  // Posizionato qui (dopo escHtml) per evitare di duplicare l'escape.
+  if (els.modelsGrid) {
+    for (const m of KNOWN_MODELS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className =
+        "btn btn--ghost model-btn" +
+        (m.key === "try-all" ? " model-btn--accent" : "");
+      btn.dataset.modelKey = m.key;
+      btn.innerHTML =
+        `<span class="model-name">${escHtml(m.label)}</span>` +
+        `<span class="model-desc">${escHtml(m.description)}</span>`;
+      btn.addEventListener("click", () => connectByModel(m.key));
+      els.modelsGrid.appendChild(btn);
+    }
   }
 
   // Mappa nomi BLE ⇒ etichette più compatte per il riquadro di output.

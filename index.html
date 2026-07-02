@@ -116,6 +116,30 @@
       </div>
     </section>
 
+    <!-- Sezione "Prova per modello": pulsanti per modello BLE specifico. Utile
+         quando "Connetti dispositivo Lovense" non trova il toy perché il
+         dispositivo pubblicizza servizi (FFE0, FFB0, FFC0...) che Chrome
+         non espone senza che siano dichiarati in optionalServices. -->
+    <section class="models card" id="modelsSection" hidden>
+      <h3 class="models__title">Prova per modello</h3>
+      <p class="models__lead">
+        Se i bottoni sopra non trovano il toy, prova questi:
+        ogni pulsante apre il chooser BLE con un profilo diverso,
+        perché il dispositivo potrebbe trasmettere su un servizio
+        "nascosto" (es. <code>FFE0</code>, <code>FFB0</code>…) che Chrome
+        non mostra di default.
+      </p>
+      <div class="models__grid" id="modelsGrid"></div>
+      <p class="hint" style="margin-top: 12px;">
+        Toy ID dal QR code: <strong>7320</strong> → prova per primo
+        <em>Clone cinese 7320</em>. Tieni il toy a meno di 1 m dal telefono,
+        in modalità pairing (LED lampeggia lentamente). Se nessuno di
+        questi bottoni connette, vai alla sezione
+        <a href="#debugSection" style="color: var(--accent);">Debug BLE</a>
+        per leggere UUID e servizi esposti.
+      </p>
+    </section>
+
     <!-- Sezione debug: visibile dopo il consenso, mostra GATT profile del dispositivo -->
     <section class="debug card" id="debugSection" hidden>
       <h2 class="debug__title">🔧 Debug BLE</h2>

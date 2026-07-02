@@ -2,7 +2,7 @@
  * Service Worker minimale per supportare l'installazione PWA.
  * Cache-first sugli asset statici.
  */
-const CACHE = "birdsexy-connect-v3";
+const CACHE = "birdsexy-connect-v4";
 const ASSETS = [
   "./",
   "./index.html",
