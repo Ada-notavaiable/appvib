@@ -168,6 +168,45 @@
       </p>
     </section>
 
+    <!-- Sezione sniffer pubblicità BLE. Usa navigator.bluetooth.requestLEScan()
+         per sniffare TUTTE le advertising BLE (incluso il toy anche quando è
+         "stealth" verso i normali scanner). Utile quando nRF Connect o il
+         chooser di Chrome non trovano il dispositivo. Supporta Chrome Android
+         88+ in context HTTPS o localhost. -->
+    <section class="sniffer card" id="snifferSection" hidden>
+      <h2 class="sniffer__title">📡 Sniffer pubblicità BLE</h2>
+      <p class="sniffer__lead">
+        Sniffa <strong>tutte le advertising BLE</strong> in aria, senza alert di
+        pairing. Mostra MAC, servizi pubblicizzati, dati manufacturer / service.
+        Si spegne da solo dopo 4 minuti o con <em>Stop</em>.
+      </p>
+      <div class="sniffer__controls">
+        <button id="snifferStartBtn" class="btn btn--primary" type="button">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/></svg>
+          Avvia sniffer
+        </button>
+        <button id="snifferStopBtn" class="btn btn--ghost btn--small" type="button" hidden>Stop sniffer</button>
+        <span id="snifferStatus" class="sniffer__status"></span>
+      </div>
+      <div id="snifferResult" class="sniffer__result" hidden></div>
+      <div class="sniffer__actions" hidden id="snifferActions">
+        <button id="snifferCopyBtn" class="btn btn--ghost btn--small" type="button">
+          Condividi / Esporta JSON
+        </button>
+        <button id="snifferClearBtn" class="btn btn--ghost btn--small" type="button">
+          Svuota lista
+        </button>
+      </div>
+      <p class="hint" style="margin-top: 12px;">
+        Se il toy <em>non compare</em> nello sniffer dopo 30s, è davvero in stealth
+        BLE (molto probabile se già connesso a LoveSpouse). A quel punto serve un
+        <strong>reset di fabbrica</strong> del dispositivo, non un altro scanner.
+        Lo sniffer serve soprattutto a: (a) confermare che il toy trasmette,
+        (b) estrarre gli UUID dei servizi <em>prima</em> ancora che entrino in
+        un profilo KNOWN_PROFILES della PWA.
+      </p>
+    </section>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <footer class="footer">

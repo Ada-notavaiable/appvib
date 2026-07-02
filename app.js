@@ -213,6 +213,14 @@
     debugSection: document.getElementById("debugSection"),
     modelsSection: document.getElementById("modelsSection"),
     modelsGrid: document.getElementById("modelsGrid"),
+    snifferSection: document.getElementById("snifferSection"),
+    snifferStartBtn: document.getElementById("snifferStartBtn"),
+    snifferStopBtn: document.getElementById("snifferStopBtn"),
+    snifferResult: document.getElementById("snifferResult"),
+    snifferActions: document.getElementById("snifferActions"),
+    snifferCopyBtn: document.getElementById("snifferCopyBtn"),
+    snifferClearBtn: document.getElementById("snifferClearBtn"),
+    snifferStatus: document.getElementById("snifferStatus"),
   };
 
   const debugEls = {
@@ -261,6 +269,7 @@
     els.controlsSection.hidden = !consented;
     els.modelsSection.hidden = !consented;
     els.debugSection.hidden = !consented;
+    els.snifferSection.hidden = !consented;
   }
 
   function lower(s) { return s.toLowerCase(); }
@@ -962,4 +971,315 @@
         .catch((err) => console.warn("SW registration failed:", err));
     });
   }
+
+  // --- BLE Sniffer pubblicità ---
+  // Usa navigator.bluetooth.requestLEScan() (Chrome Android 88+, contesto HTTPS
+  // o localhost). Osserva TUTTE le advertising BLE ricevute dal telefono, utile
+  // a identificare device che nRF Connect o requestDevice non rilevano (es.
+  // child stealth post-bonding, advertising lento, filtri aggressivi dell'OS
+  // Android). keepRepeatedDevices=true serve a osservare RSSI e frequenza adv
+  // per ogni device.
+  // Chrome tipicamente auto-stoppa uno scan dopo ~5 minuti. Lo facciamo prima noi
+  // (4 min) per mostrare uno stato finale esplicito e poter rilasciare subito gli
+  // handler. Tunabile da qui senza dover cercare il numero magico.
+  const SNIFFER_AUTO_STOP_MS = 4 * 60 * 1000;
+  let currentSnifferScan = null;
+  let snifferAutoStopTimer = null; // salvato per evitare che un timeout precedente
+                                    // fermi un nuovo scan dopo Start→Stop→Start.
+  const sniffedDevices = new Map(); // id → { count, firstSeen, lastSeen, reports[] }
+  let snifferStartedAt = 0;
+
+  function isLeScanSupported() {
+    return typeof navigator !== "undefined"
+      && "bluetooth" in navigator
+      && typeof navigator.bluetooth.requestLEScan === "function";
+  }
+
+  function isSecureContext() {
+    return (
+      location.protocol === "https:" ||
+      location.hostname === "localhost" ||
+      location.hostname === "127.0.0.1"
+    );
+  }
+
+  function snifferErrorLabel(err) {
+    if (!err) return "Errore sconosciuto";
+    if (err.name === "NotSupportedError") return "requestLEScan non supportato (serve Chrome Android 88+)";
+    if (err.name === "SecurityError") return "Contesto non sicuro: serve HTTPS o localhost";
+    if (err.name === "InvalidStateError") return "Uno sniffer è già attivo";
+    if (err.name === "NotAllowedError") return "Permesso negato dall'utente";
+    return err.message || err.name || "Errore";
+  }
+
+  function bytesHex(input) {
+    if (input == null) return "";
+    let view;
+    if (input instanceof DataView) {
+      view = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    } else if (input instanceof ArrayBuffer) {
+      view = new Uint8Array(input);
+    } else if (Array.isArray(input)) {
+      return input.map((b) => b.toString(16).padStart(2, "0")).join(" ");
+    } else {
+      return String(input);
+    }
+    return Array.from(view, (b) => b.toString(16).padStart(2, "0")).join(" ");
+  }
+
+  function snifferShortUuid(uuid) {
+    const m = String(uuid).match(
+      /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/i
+    );
+    return m ? "0x" + m[1].toUpperCase() : uuid;
+  }
+
+  async function startSniffer() {
+    if (currentSnifferScan) return;
+    if (!isLeScanSupported()) {
+      showToast(
+        "requestLEScan non supportato qui: serve Chrome Android 88+",
+        "error"
+      );
+      return;
+    }
+    if (!isSecureContext()) {
+      showToast("Lo sniffer richiede HTTPS o localhost", "error");
+      return;
+    }
+
+    sniffedDevices.clear();
+    els.snifferResult.hidden = false;
+    els.snifferResult.innerHTML =
+      '<div style="color: var(--muted);">⏳ Scan in corso… la prima pubblicità può richiedere 5-10s</div>';
+    els.snifferStartBtn.hidden = true;
+    els.snifferStopBtn.hidden = false;
+    els.snifferActions.hidden = true;
+    els.snifferStatus.textContent = "🟡 avvio…";
+    snifferStartedAt = Date.now();
+
+    try {
+      currentSnifferScan = await navigator.bluetooth.requestLEScan({
+        acceptAllAdvertisements: true,
+        keepRepeatedDevices: true,
+      });
+      navigator.bluetooth.addEventListener(
+        "advertisementreceived",
+        onAdvertisementReceived
+      );
+      els.snifferStatus.textContent = "🟢 attivo";
+      showToast("Sniffer attivo — attendi le pubblicità", "success");
+
+      // Auto-stop dopo SNIFFER_AUTO_STOP_MS: l'ID del timer è salvato in
+      // snifferAutoStopTimer così stopSniffer() può cancellarlo esplicitamente.
+      // Vedi review: senza tracking, una sequenza Start→Stop→Start faceva fermare
+      // il secondo scan dal timeout orfano del primo.
+      snifferAutoStopTimer = setTimeout(() => {
+        if (currentSnifferScan) {
+          stopSniffer();
+          showToast("Sniffer fermato (timeout 4 min)");
+        }
+      }, SNIFFER_AUTO_STOP_MS);
+    } catch (err) {
+      console.error("requestLEScan fallito:", err);
+      els.snifferStatus.textContent = "🔴 errore";
+      showToast(snifferErrorLabel(err), "error");
+      els.snifferStartBtn.hidden = false;
+      els.snifferStopBtn.hidden = true;
+    }
+  }
+
+  function stopSniffer() {
+    if (!currentSnifferScan) return;
+    // Cancella il timeout pendente: se l'utente ferma manualmente, il timer
+    // orfano non deve sparare in futuro contro un nuovo scan.
+    if (snifferAutoStopTimer) {
+      clearTimeout(snifferAutoStopTimer);
+      snifferAutoStopTimer = null;
+    }
+    try {
+      navigator.bluetooth.removeEventListener(
+        "advertisementreceived",
+        onAdvertisementReceived
+      );
+      currentSnifferScan.stop();
+    } catch (e) {
+      console.warn("Stop sniffer error:", e);
+    }
+    currentSnifferScan = null;
+    els.snifferStartBtn.hidden = false;
+    els.snifferStopBtn.hidden = true;
+    const elapsedSec = snifferStartedAt
+      ? Math.round((Date.now() - snifferStartedAt) / 1000)
+      : 0;
+    const deviceCount = sniffedDevices.size;
+    els.snifferStatus.textContent =
+      `⏹ fermato dopo ${elapsedSec}s · ${deviceCount} dispositivo/i`;
+  }
+
+  function onAdvertisementReceived(event) {
+    const device = event.device;
+    // device.id può non essere disponibile finché non si connette
+    // formalmente; fallback deterministico su uuid + name quando serve.
+    const id =
+      device.id ||
+      ((event.uuids && event.uuids[0]) || "no-uuid") +
+        "|" +
+        (device.name || "no-name");
+    const existing = sniffedDevices.get(id);
+
+    const adv = {
+      name: device.name || "(no name)",
+      id,
+      rssi: event.rssi,
+      txPower: event.txPower != null ? event.txPower : null,
+      appearance: event.appearance != null ? event.appearance : null,
+      uuids: Array.from(event.uuids || []),
+      manufacturerData: {},
+      serviceData: {},
+    };
+    if (event.manufacturerData) {
+      for (const [manId, dv] of event.manufacturerData) {
+        adv.manufacturerData[manId] = bytesHex(dv);
+      }
+    }
+    if (event.serviceData) {
+      for (const [sUUID, dv] of event.serviceData) {
+        adv.serviceData[sUUID] = bytesHex(dv);
+      }
+    }
+
+    if (existing) {
+      existing.count++;
+      existing.lastSeen = Date.now();
+      // Tieni solo gli ultimi 10 report per non saturare la memoria: su
+      // Android una raffica di adv può davvero riempire il DOM.
+      if (existing.reports.length >= 10) existing.reports.shift();
+      existing.reports.push(adv);
+    } else {
+      sniffedDevices.set(id, {
+        count: 1,
+        firstSeen: Date.now(),
+        lastSeen: Date.now(),
+        reports: [adv],
+      });
+    }
+
+    renderSnifferResult();
+  }
+
+  function renderSnifferResult() {
+    if (sniffedDevices.size === 0) {
+      els.snifferResult.innerHTML =
+        '<div style="color: var(--muted);">⏳ Scan attivo, in attesa di pubblicità…</div>';
+      els.snifferActions.hidden = true;
+      return;
+    }
+
+    const sorted = Array.from(sniffedDevices.entries()).sort((a, b) =>
+      b[1].lastSeen - a[1].lastSeen
+    );
+    const total = sorted.reduce((n, [, info]) => n + info.count, 0);
+
+    const lines = [];
+    lines.push(
+      `<div class="sniffer__count">📡 ${sorted.length} dispositivo/i, ${total} pacchetto/i totali</div>`
+    );
+
+    for (const [id, info] of sorted) {
+      const rep = info.reports[info.reports.length - 1];
+      const ago = Math.round((Date.now() - info.lastSeen) / 1000);
+      lines.push(
+        `<div class="sniffer__device">▸ ${escHtml(rep.name)}` +
+          ` <span class="sniffer__device-meta">(${escHtml(id)})</span></div>`
+      );
+      lines.push(
+        `<div class="sniffer__row">RSSI: ${rep.rssi} dBm · ` +
+          `visto ${info.count}× · ultima ${ago}s fa</div>`
+      );
+      if (rep.uuids.length) {
+        const uuidsHtml = rep.uuids.map((u) => `<code>${escHtml(snifferShortUuid(u))}</code>`);
+        lines.push(
+          `<div class="sniffer__row">UUID pubblicizzati: ${uuidsHtml.join(", ")}</div>`
+        );
+      }
+      const mnKeys = Object.keys(rep.manufacturerData);
+      if (mnKeys.length) {
+        lines.push(`<div class="sniffer__row">Manufacturer data:</div>`);
+        for (const k of mnKeys) {
+          lines.push(
+            `<div class="sniffer__row sub">0x${k} → <code>${escHtml(rep.manufacturerData[k])}</code></div>`
+          );
+        }
+      }
+      const sdKeys = Object.keys(rep.serviceData);
+      if (sdKeys.length) {
+        lines.push(`<div class="sniffer__row">Service data:</div>`);
+        for (const k of sdKeys) {
+          lines.push(
+            `<div class="sniffer__row sub">${escHtml(snifferShortUuid(k))} → <code>${escHtml(rep.serviceData[k])}</code></div>`
+          );
+        }
+      }
+    }
+
+    els.snifferResult.innerHTML = lines.join("");
+    els.snifferActions.hidden = false;
+  }
+
+  async function exportSnifferJson() {
+    const data = Array.from(sniffedDevices.entries()).map(([id, info]) => ({
+      id,
+      count: info.count,
+      firstSeenIso: new Date(info.firstSeen).toISOString(),
+      lastSeenIso: new Date(info.lastSeen).toISOString(),
+      latestReport: info.reports[info.reports.length - 1],
+      reports: info.reports,
+    }));
+    const json = JSON.stringify(data, null, 2);
+
+    // Preferisci la share-sheet nativa (mobile), poi clipboard, infine download.
+    try {
+      if (navigator.share && data.length < 50) {
+        await navigator.share({ title: "Sniffer BLE", text: json });
+        return;
+      }
+    } catch (_) { /* utente ha annullato o non disponibile: fallback sotto */ }
+
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        await navigator.clipboard.writeText(json);
+        showToast(`JSON copiato (${data.length} dispositivo/i)`, "success");
+        return;
+      }
+    } catch (_) { /* fallback download */ }
+
+    try {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ble-sniff-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("File JSON scaricato", "success");
+    } catch (e) {
+      console.error("Export sniffer fallito:", e);
+      showToast("Impossibile esportare", "error");
+    }
+  }
+
+  function clearSnifferList() {
+    sniffedDevices.clear();
+    els.snifferResult.innerHTML =
+      '<div style="color: var(--muted);">Lista svuotata. Lo scan è ancora attivo (se lo era).</div>';
+    els.snifferActions.hidden = true;
+  }
+
+  els.snifferStartBtn?.addEventListener("click", startSniffer);
+  els.snifferStopBtn?.addEventListener("click", stopSniffer);
+  els.snifferCopyBtn?.addEventListener("click", exportSnifferJson);
+  els.snifferClearBtn?.addEventListener("click", clearSnifferList);
 })();
